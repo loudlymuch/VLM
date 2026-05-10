@@ -1,0 +1,18 @@
+# 忽略数据文件夹（里面有成千上万张图片，绝对不能传）
+data/
+# 忽略训练输出的模型权重和日志
+outputs/
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+# 忽略虚拟环境
+.venv/
+venv/
+# 忽略系统文件
+.DS_Store
+# 忽略所有名为 data 的文件夹及其子内容
+**/data/
+# 忽略所有名为 images 的文件夹
+**/images/
+# 忽略所有 jsonl 文件（因为它们也很大）
+*.jsonl
