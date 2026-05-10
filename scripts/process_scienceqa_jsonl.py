@@ -19,14 +19,17 @@ def export_scienceqa_jsonl(dataset_dict, out_dir: str) -> None:
         os.makedirs(split_dir, exist_ok=True)
         out_path = os.path.join(out_dir, f"scienceqa_{split_name}.jsonl")
 
+        kept = 0
+        skipped = 0
         with open(out_path, "w", encoding="utf-8") as f:
             for idx, sample in enumerate(split_ds):
                 image = sample.get("image")
                 image_path = ""
-                if image is not None:
-                    image_path = os.path.join(split_dir, f"{idx}.png")
-                    image.save(image_path)
-
+                if image is None:
+                    skipped += 1
+                    continue
+                image_path = os.path.join(split_dir, f"{idx}.png")
+                image.save(image_path)
                 choices = sample.get("choices") or []
                 answer_idx = sample.get("answer")
                 answer_text = ""
@@ -49,6 +52,8 @@ def export_scienceqa_jsonl(dataset_dict, out_dir: str) -> None:
                     "task": "scienceqa",
                 }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                kept += 1
+        print(f"{split_name}: kept={kept}, skipped_no_image={skipped}")
 
 
 def main() -> None:
