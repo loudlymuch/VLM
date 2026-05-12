@@ -16,3 +16,4 @@ venv/
 **/images/
 # 忽略所有 jsonl 文件（因为它们也很大）
 *.jsonl
+scripts\test.ipynb
