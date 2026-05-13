@@ -1,6 +1,7 @@
 """Train the model with a minimal QLoRA setup using Hugging Face Trainer."""
 import os
 
+import numpy as np
 import torch
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -24,6 +25,19 @@ def build_prompt(question: str, choices: list[str]) -> str:
     )
 
 
+def compute_metrics(eval_pred):
+    predictions, labels = eval_pred
+    if isinstance(predictions, (tuple, list)):
+        predictions = predictions[0]
+    pred_ids = np.argmax(predictions, axis=-1)
+    mask = labels != -100
+    if mask.sum() == 0:
+        return {"token_acc": 0.0}
+    correct = (pred_ids == labels) & mask
+    token_acc = correct.sum() / mask.sum()
+    return {"token_acc": float(token_acc)}
+
+
 class VisionDataCollator:
     def __init__(self, processor):
         self.processor = processor
@@ -31,6 +45,7 @@ class VisionDataCollator:
     def __call__(self, batch):
         texts = []
         images = []
+        prompt_lens = []
 
         for sample in batch:
             image_path = sample.get("image")
@@ -50,7 +65,7 @@ class VisionDataCollator:
             else:
                 answer_text = str(answer_idx)
 
-            messages = [
+            messages_prompt = [
                 {
                     "role": "user",
                     "content": [
@@ -58,20 +73,36 @@ class VisionDataCollator:
                         {"type": "text", "text": prompt},
                     ],
                 },
+            ]
+            messages_full = messages_prompt + [
                 {
                     "role": "assistant",
                     "content": [{"type": "text", "text": answer_text}],
-                },
+                }
             ]
-            text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False
+            prompt_text = self.processor.apply_chat_template(
+                messages_prompt, tokenize=False, add_generation_prompt=True
             )
-            image_inputs, _ = process_vision_info(messages)
+            full_text = self.processor.apply_chat_template(
+                messages_full, tokenize=False, add_generation_prompt=False
+            )
+            prompt_image_inputs, _ = process_vision_info(messages_prompt)
+            image_inputs, _ = process_vision_info(messages_full)
             if not image_inputs:
                 continue
 
-            texts.append(text)
+            prompt_inputs = self.processor(
+                text=[prompt_text],
+                images=prompt_image_inputs,
+                videos=None,
+                padding=True,
+                return_tensors="pt",
+            )
+            prompt_len = prompt_inputs.input_ids.size(1)
+
+            texts.append(full_text)
             images.append(image_inputs[0])
+            prompt_lens.append(prompt_len)
 
         inputs = self.processor(
             text=texts,
@@ -85,6 +116,10 @@ class VisionDataCollator:
         pad_id = self.processor.tokenizer.pad_token_id
         if pad_id is not None:
             labels[labels == pad_id] = -100
+        for i, prompt_len in enumerate(prompt_lens):
+            if prompt_len > labels.size(1):
+                prompt_len = labels.size(1)
+            labels[i, :prompt_len] = -100
         inputs["labels"] = labels
         return inputs
 
@@ -93,10 +128,11 @@ def main() -> None:
     # Simple configuration for beginners
     model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
     train_jsonl = "data/processed/scienceqa_train.jsonl"
+    eval_jsonl = "data/processed/scienceqa_validation.jsonl"
     output_dir = "outputs/checkpoints/qlora_scienceqa"
     max_steps = 200
     batch_size = 1
-    grad_accum = 4
+    grad_accum = 8
     lr = 2e-4
 
     os.makedirs(output_dir, exist_ok=True)
@@ -105,6 +141,7 @@ def main() -> None:
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
     )
 
     processor = AutoProcessor.from_pretrained(model_name)
@@ -129,27 +166,41 @@ def main() -> None:
     model.train()
 
     dataset = load_dataset("json", data_files={"train": train_jsonl})["train"]
+    eval_dataset = load_dataset("json", data_files={"validation": eval_jsonl})[
+        "validation"
+    ]
     data_collator = VisionDataCollator(processor)
 
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=batch_size,
+        # per_device_eval_batch_size=batch_size,
         gradient_accumulation_steps=grad_accum,
         learning_rate=lr,
         max_steps=max_steps,
         logging_steps=10,
-        save_steps=max_steps,
+        save_steps=100,
         fp16=False,
         bf16=True,
         remove_unused_columns=False,
         report_to=[],
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.1,  
+        gradient_checkpointing=True,
+        optim="paged_adamw_8bit",
+        save_total_limit=3,
+        save_strategy="steps",
+        # evaluation_strategy="steps",
+        # eval_steps=100,
     )
 
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
+        # eval_dataset=eval_dataset,
         data_collator=data_collator,
+        # compute_metrics=compute_metrics,
         tokenizer=processor.tokenizer,
     )
 
