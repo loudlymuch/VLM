@@ -1,8 +1,9 @@
-"""Evaluate baseline accuracy on a JSONL dataset."""
+"""Evaluate fine-tuned LoRA accuracy on a JSONL dataset."""
 import json
 
 import torch
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+from peft import PeftModel
 from qwen_vl_utils import process_vision_info
 
 from transformers import BitsAndBytesConfig
@@ -13,54 +14,58 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_compute_dtype=torch.bfloat16,
 )
 
-def build_prompt(question: str, choices: list[str]) -> str:
-    options = "\n".join([f"{i}. {c}" for i, c in enumerate(choices)])
+def build_prompt(question: str) -> str:
     return (
         "Answer the question based on the image. "
-        "Return only the option index.\n"
+        "Return in the format: Reasoning: ... Answer: ...\n"
         f"Question: {question}\n"
-        f"Choices:\n{options}\n"
     )
 
 
-def parse_index(text: str) -> int:
-    digits = []
-    for ch in text:
-        if ch.isdigit():
-            digits.append(ch)
-        elif digits:
-            break
-    cleaned = text.strip()
-    if not cleaned:
-        return -1
-    digits = ""
-    for ch in cleaned:
-        if ch.isdigit():
-            digits += ch
-        elif digits:
-            break
-    if not digits:
-        return -1
-    return int(digits)
+def normalize_text(text: str) -> str:
+    return "".join(ch.lower() for ch in text if ch.isalnum() or ch.isspace()).strip()
+
+
+def extract_answer_text(pred_text: str) -> str:
+    if not pred_text:
+        return ""
+    lowered = pred_text.lower()
+    marker = "answer:"
+    pos = lowered.find(marker)
+    if pos == -1:
+        return pred_text
+    return pred_text[pos + len(marker) :]
+
+
+def is_correct(pred_text: str, answer_text: str) -> bool:
+    if not pred_text or not answer_text:
+        return False
+    extracted = extract_answer_text(pred_text)
+    pred_norm = normalize_text(extracted)
+    ans_norm = normalize_text(answer_text)
+    return ans_norm in pred_norm
 
 
 def main() -> None:
     # Simple configuration for beginners
     model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
     jsonl_path = "data/processed/scienceqa_validation.jsonl"
+    jsonl_train_path = "data/processed/scienceqa_train.jsonl"
+    lora_path = "outputs/checkpoints/qlora_scienceqa"
     max_samples = 1000
-    max_new_tokens = 32
+    max_new_tokens = 512
     temperature = 0.2
     top_p = 0.9
 
     processor = AutoProcessor.from_pretrained(model_name)
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_name,
         dtype="auto",
         device_map="auto",
         low_cpu_mem_usage=True,
         quantization_config=bnb_config,
     )
+    model = PeftModel.from_pretrained(base_model, lora_path)
 
     total = 0
     correct = 0
@@ -78,10 +83,14 @@ def main() -> None:
             question = sample.get("question", "")
             choices = sample.get("choices", [])
             answer_idx = sample.get("answer")
-            if not isinstance(answer_idx, int):
+            answer_text = sample.get("answer_text") or ""
+            if not answer_text and isinstance(answer_idx, int) and choices:
+                if 0 <= answer_idx < len(choices):
+                    answer_text = str(choices[answer_idx])
+            if not answer_text:
                 continue
 
-            prompt = build_prompt(question, choices)
+            prompt = build_prompt(question)
             messages = [
                 {
                     "role": "user",
@@ -120,10 +129,10 @@ def main() -> None:
                 skip_special_tokens=True,
                 clean_up_tokenization_spaces=False,
             )
-            pred_idx = parse_index(decoded[0])
+            pred_text = decoded[0]
 
             total += 1
-            if pred_idx == answer_idx:
+            if is_correct(pred_text, answer_text):
                 correct += 1
 
             if total % 20 == 0:

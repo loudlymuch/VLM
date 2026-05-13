@@ -15,13 +15,11 @@ from transformers import (
 from qwen_vl_utils import process_vision_info
 
 
-def build_prompt(question: str, choices: list[str]) -> str:
-    options = "\n".join([f"{i}. {c}" for i, c in enumerate(choices)])
+def build_prompt(question: str) -> str:
     return (
         "Answer the question based on the image. "
-        "Return only the option index.\n"
+        "Return in the format: Reasoning: ... Answer: ...\n"
         f"Question: {question}\n"
-        f"Choices:\n{options}\n"
     )
 
 
@@ -55,15 +53,19 @@ class VisionDataCollator:
             question = sample.get("question", "")
             choices = sample.get("choices", [])
             answer_idx = sample.get("answer")
-            if not isinstance(answer_idx, int):
+            answer_text = sample.get("answer_text") or ""
+            if not answer_text and isinstance(answer_idx, int) and choices:
+                if 0 <= answer_idx < len(choices):
+                    answer_text = str(choices[answer_idx])
+            if not answer_text:
                 continue
 
-            prompt = build_prompt(question, choices)
+            prompt = build_prompt(question)
             rationale = sample.get("rationale") or ""
             if rationale:
-                answer_text = f"Reasoning: {rationale}\nAnswer: {answer_idx}"
+                answer_text = f"Reasoning: {rationale}\nAnswer: {answer_text}"
             else:
-                answer_text = str(answer_idx)
+                answer_text = f"Answer: {answer_text}"
 
             messages_prompt = [
                 {
