@@ -21,7 +21,7 @@ def main() -> None:
     dataset_mv.save_to_disk(os.path.join(raw_data_path, "mathvista"))
     print("MathVista 下载完成！")
 
-    dataset_chart = load_dataset("lmms-lab/ChartQA")
+    dataset_chart = load_dataset("HuggingFaceM4/ChartQA")
     dataset_chart.save_to_disk(os.path.join(raw_data_path, "chartqa"))
     print("ChartQA 下载完成！")
 

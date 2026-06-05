@@ -25,24 +25,37 @@ def load_model(model_name: str, lora_path: str | None):
 	return processor, model
 
 
-def build_prompt(question: str, want_reasoning: bool) -> str:
-	prompt = (
-		"Answer the question based on the image. "
-		"Return in the format: Reasoning: ... Answer: ...\n"
-		f"Question: {question}\n"
-	)
-	if want_reasoning:
-		prompt += "Explain your reasoning briefly."
-	return prompt
+def build_prompt(question: str, choices_str: str, want_reasoning: bool) -> str:
+    # 选项处理逻辑
+    has_choices = choices_str and choices_str.strip()
+    options_text = f"Candidate options: {choices_str}" if has_choices else ""
+    
+    # 核心指令：强制遵循输出格式
+    instruction = "Analyze the image and solve the question."
+    
+    # 格式要求字符串
+    format_instruction = "Your output must strictly follow this format:\nReasoning: <your step-by-step analysis>\nAnswer: <the final answer>"
+    
+    # 如果用户不想看过程，我们可以提示模型尽量简洁
+    if not want_reasoning:
+        format_instruction = "Your output must strictly follow this format:\nAnswer: <the final answer>"
+        instruction += " Be concise."
+
+    return (
+        f"{instruction}\n\n"
+        f"Question: {question}\n"
+        f"{options_text}\n\n"
+        f"{format_instruction}"
+    )
 
 
-def infer(image, question, want_reasoning, max_new_tokens, temperature, top_p):
+def infer(image, question, want_reasoning, choices_str, max_new_tokens, temperature, top_p):
 	if image is None:
-		return "Please upload an image."
+		return "Please upload an image!"
 	if not question:
-		return "Please enter a question."
+		return "Please enter a question!"
 
-	prompt = build_prompt(question, want_reasoning)
+	prompt = build_prompt(question, choices_str,want_reasoning)
 	messages = [
 		{
 			"role": "user",
@@ -85,8 +98,8 @@ def infer(image, question, want_reasoning, max_new_tokens, temperature, top_p):
 	return decoded[0]
 
 
-MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
-LORA_PATH = "scripts/outputs/checkpoints/qlora_scienceqa"
+MODEL_NAME = "/mnt/workspace/vlm-model-dir"
+LORA_PATH = "/mnt/workspace/VLM/scripts/outputs/checkpoints/qlora_scienceqa/checkpoint-2334"
 
 processor, model = load_model(MODEL_NAME, LORA_PATH)
 
@@ -98,6 +111,7 @@ with gr.Blocks(title="VLM Science QA Demo") as demo:
 		image_input = gr.Image(type="pil", label="Image")
 		with gr.Column():
 			question_input = gr.Textbox(label="Question")
+			choices_input = gr.Textbox(label="可选：候选项 (用逗号分隔)")
 			want_reasoning = gr.Checkbox(label="Show reasoning", value=False)
 			max_new_tokens = gr.Slider(16, 256, value=64, step=8, label="Max new tokens")
 			temperature = gr.Slider(0.0, 1.0, value=0.2, step=0.05, label="Temperature")
@@ -112,6 +126,7 @@ with gr.Blocks(title="VLM Science QA Demo") as demo:
 			image_input,
 			question_input,
 			want_reasoning,
+			choices_input,
 			max_new_tokens,
 			temperature,
 			top_p,
@@ -121,4 +136,4 @@ with gr.Blocks(title="VLM Science QA Demo") as demo:
 
 
 if __name__ == "__main__":
-	demo.launch()
+	demo.launch(server_name="0.0.0.0", server_port=7860, share=False)

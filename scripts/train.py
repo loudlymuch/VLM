@@ -102,10 +102,11 @@ def normalize_sample(sample: dict) -> dict | None:
     把不同数据集的样本统一为相同的字段格式。
 
     背景：四个数据集的字段名和含义不完全一样——
-    - ScienceQA:  answer 是整数索引（0/1/2/3），需要从 choices 中取出对应的文字
+    - ScienceQA:  answer 字段是选项索引（如 0/1/2/3），
+                  但 answer_text 已在预处理时从 choices[answer] 解析好，直接可用
     - MathVista:  answer 直接就是答案字符串，没有 answer_text 字段
-                  choices 可能是个空字符串 "none"
-    - ChartQA / DocVQA: answer_text 就是答案，choices 为空列表
+                  choices 可能是空字符串 "none"（需转为空列表）
+    - ChartQA / DocVQA: answer_text 就是答案，choices 为空列表，无推理链
 
     本函数的任务就是把这些差异"抹平"，
     让下游的 Collator 和 Trainer 看到的都是统一格式。
@@ -140,14 +141,16 @@ def normalize_sample(sample: dict) -> dict | None:
     answer_idx = sample.get("answer")                # 再获取 answer 字段（可能是索引或字符串）
 
     # 如果 answer_text 为空，尝试从 answer 字段推断
+    # 注意：正常处理的 ScienceQA / ChartQA / DocVQA 的 answer_text 已在预处理时填好，
+    # 不会进入此分支。这里只处理"answer_text 意外缺失"的兜底情况
     if not answer_text:
         if isinstance(answer_idx, int) and choices and 0 <= answer_idx < len(choices):
-            # 情况 A（ScienceQA 风格）：answer 是整数索引，从 choices 列表中取出对应文字
+            # 情况 A：answer 是整数索引 → 从 choices 列表中取出对应文字
             # 例如 answer=2, choices=["cat","dog","bird","fish"] → answer_text="bird"
             answer_text = str(choices[answer_idx])
 
         elif isinstance(answer_idx, str) and answer_idx.strip():
-            # 情况 B（MathVista 风格）：answer 直接就是答案字符串
+            # 情况 B：answer 直接就是答案字符串（MathVista 主路径在此）
             # 例如 answer="42" → answer_text="42"
             answer_text = answer_idx.strip()
             answer_idx = None   # 转为开放题格式
