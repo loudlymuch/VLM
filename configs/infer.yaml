@@ -1,1 +1,29 @@
-# Inference configuration
+# ============================================================================
+# 推理与评估配置
+# ============================================================================
+
+# --- 模型路径 ---
+model: "/mnt/workspace/vlm-model-dir"  # Qwen2.5-VL-7B-Instruct 本地路径
+lora: null                              # LoRA adapter 路径（null = 自动查找最新 checkpoint）
+
+# --- 数据 ---
+test_data:
+  - "data/processed/scienceqa_validation.jsonl"
+  - "data/processed/mathvista_validation.jsonl"
+
+# --- 生成参数 ---
+max_new_tokens: 512       # 最大生成 token 数
+temperature: 0.2          # 温度（越低越确定）
+top_p: 0.9                # nucleus sampling
+do_sample: true
+
+# --- 评估模式 ---
+test_mode: "with_options"  # with_options | no_options
+
+# --- 输出 ---
+save_results: true
+results_path: "outputs/eval_results.json"
+
+# --- 图像处理 ---
+max_pixels: 802816        # 1024 × 28 × 28
+min_pixels: 200704        # 256 × 28 × 28

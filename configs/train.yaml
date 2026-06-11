@@ -1,1 +1,70 @@
-# Training configuration
+# ============================================================================
+# QLoRA 多数据集联合训练配置
+# ============================================================================
+
+# --- 模型路径 ---
+model: "/mnt/workspace/vlm-model-dir"  # Qwen2.5-VL-7B-Instruct 本地路径或 HuggingFace ID
+
+# --- 数据 ---
+train_data:
+  - "data/processed/scienceqa_train.jsonl"
+  - "data/processed/mathvista_train.jsonl"
+  - "data/processed/chartqa_train.jsonl"
+  - "data/processed/docvqa_train.jsonl"
+
+eval_data: null  # 验证集路径列表，null 表示不评估
+
+output_dir: "outputs/checkpoints/qlora_multitask"
+
+# --- 训练超参数 ---
+batch_size: 1             # 每 GPU 的 batch size
+grad_accum: 8             # 梯度累积步数（有效 batch = 1 × 8 = 8）
+lr: 0.0002                # 学习率（2e-4）
+epochs: 3                 # 训练轮数
+max_steps: -1             # 最大步数（-1 = 按 epochs 控制）
+
+# --- QLoRA ---
+lora_r: 16                # LoRA 秩
+lora_alpha: 32            # 缩放因子（实际学习率 × alpha/r）
+lora_dropout: 0.05        # LoRA dropout
+target_modules:
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
+
+# --- 量化 ---
+load_in_4bit: true
+bnb_4bit_quant_type: "nf4"
+bnb_4bit_compute_dtype: "bfloat16"
+bnb_4bit_use_double_quant: true
+
+# --- 混合训练 ---
+nochoice_random: 0.2      # 随机隐藏选项的概率（0 = 始终显示，1 = 始终隐藏）
+
+# --- 保存与日志 ---
+save_steps: 300           # 每 N 步存一个 checkpoint
+logging_steps: 10         # 每 N 步打印 loss
+save_total_limit: 3       # 只保留最近 3 个 checkpoint
+
+# --- 优化器与调度 ---
+optim: "paged_adamw_8bit"
+lr_scheduler: "cosine"    # 余弦退火
+warmup_ratio: 0.1         # 前 10% 步数线性 warmup
+weight_decay: 0.0
+
+# --- 精度与计算 ---
+bf16: true                # bfloat16 混合精度
+fp16: false
+gradient_checkpointing: true  # 用计算换显存
+
+# --- 图像处理 ---
+max_pixels: 802816        # 1024 × 28 × 28，超出缩放
+min_pixels: 200704        # 256 × 28 × 28，不足放大
+
+# --- 其他 ---
+seed: 42
+resume: false             # 从最近 checkpoint 续训
