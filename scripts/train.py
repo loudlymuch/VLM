@@ -20,9 +20,11 @@ import argparse   # 解析命令行参数，让我们可以在终端灵活配置
 import glob       # 用通配符查找文件，比如查找已有的 checkpoint 目录
 import os         # 文件和目录操作
 import random     # 控制随机数，用于混合训练中随机隐藏选项
+import sys        # 读取命令行参数，用于提前提取 --config
 
 import numpy as np
 import torch
+import yaml       # 解析 YAML 配置文件 (pip install pyyaml)
 from datasets import Dataset, concatenate_datasets, load_dataset
 # Dataset: 创建一个 HuggingFace 数据集对象（类似表格）
 # concatenate_datasets: 把多个数据集拼接成一个
@@ -507,7 +509,27 @@ def main() -> None:
                         help="图像最大像素数（1024×28×28 = 802816），超出会被缩放")
     parser.add_argument("--min-pixels", type=int, default=256 * 28 * 28,
                         help="图像最小像素数（256×28×28 = 200704），不足会被放大")
+    parser.add_argument("--config", type=str, default=None,
+                        help="YAML 配置文件路径（CLI 参数会覆盖配置文件中的值）")
 
+    # ---- 两阶段参数解析：先读 YAML 配置文件，CLI 参数自动覆盖 ----
+    # 第一步：提前扫描命令行，找出 --config 的路径
+    config_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--config" and i + 1 < len(sys.argv):
+            config_path = sys.argv[i + 1]
+            break
+
+    # 第二步：如果指定了配置文件，把里面的值设为解析器的默认值
+    if config_path and os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        # CLI 参数名用连字符（--train-data），argparse 内部存为下划线（train_data）
+        # YAML 文件用下划线，和 argparse 内部名一致
+        parser.set_defaults(**config)
+        print(f"已加载配置文件: {config_path}")
+
+    # 第三步：正式解析（CLI 参数会覆盖配置文件中的同名值）
     args = parser.parse_args()
 
     # ---- 设置随机种子，确保训练可复现 ----
